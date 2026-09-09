@@ -1,0 +1,12 @@
+LR_IROM1 0x00000000 0x00100000  {    ; ITCM 1MB：整个镜像链接在 ITCM
+  AXI_ITCM 0x00000000 0x00100000  {
+   *.o (RESET, +First)
+   *(InRoot$$Sections)
+   .ANY (+RO)
+   .ANY (+XO)
+  }
+  RW_AXI_SRAM 0x24000000 0x0001F000  {  ; top 4KB reserved for OTA flag(0x2401FF00)
+   *(STACK)
+   .ANY (+RW +ZI)
+  }
+}

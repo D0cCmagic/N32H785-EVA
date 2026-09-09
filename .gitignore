@@ -1,0 +1,25 @@
+# ===== Keil MDK build outputs =====
+Objects/
+Listings/
+DebugConfig/
+EventRecorderStub.scvd
+*.uvguix.*
+*.bak
+*.dep
+*.d
+*.crf
+*.o
+*.axf
+*.htm
+*.lnp
+*.iex
+*.lst
+*.map
+
+# ===== generated binaries =====
+*.bin
+*.hex
+*.elf
+
+# ===== JLink =====
+JLinkLog*
