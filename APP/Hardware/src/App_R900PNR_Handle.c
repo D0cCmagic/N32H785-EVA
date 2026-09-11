@@ -1,31 +1,32 @@
 #include "app_r900pnr_handle.h"
 #include <string.h>
 
-/*============================================================================*
- * 私有变量 (仅本文件可见)
- *============================================================================*/
-static const uint8_t s_peer_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-static uint8_t s_spi_rx_buf[2048u];
+/* Module-private statics */
+static const uint8_t Peer_Mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static uint8_t Spi_Rx_Buf[2048u];
 
 #if (APP_WIFI_ROLE == APP_ROLE_STA)
-static uint8_t  s_wifi_connected = 0;
-static uint8_t  s_tx_started = 0;
-static uint32_t s_assoc_start_tick = 0;
-static uint32_t s_tx_total_bytes = 0;
-static uint32_t s_tx_total_pkts  = 0;
-static uint32_t s_tx_fail_cnt    = 0;
-static uint32_t s_tx_last_print_tick = 0;
+static uint8_t  Wifi_Connected = 0;
+static uint8_t  Tx_Started = 0;
+static uint32_t Assoc_Start_Tick = 0;
+static uint32_t Tx_Total_Bytes = 0;
+static uint32_t Tx_Total_Pkts  = 0;
+static uint32_t Tx_Fail_Cnt    = 0;
+static uint32_t Tx_Last_Print_Tick = 0;
 #endif
 
 #if (APP_WIFI_ROLE == APP_ROLE_AP)
-static uint32_t s_rx_total_bytes = 0;
-static uint32_t s_rx_total_pkts  = 0;
-static uint32_t s_rx_last_print_tick = 0;
+static uint32_t Rx_Total_Bytes = 0;
+static uint32_t Rx_Total_Pkts  = 0;
+static uint32_t Rx_Last_Print_Tick = 0;
 #endif
 
-/*============================================================================*
- * delay_ms: 基于 sys_now 的毫秒延时, 不破坏 SysTick 中断
- *============================================================================*/
+/**
+ * @name    delay_ms
+ * @brief   Millisecond delay driven by sys_now, does not block SysTick.
+ * @param   ms: delay length in milliseconds.
+ * @retval  None
+ */
 void delay_ms(uint32_t ms)
 {
     uint32_t start = sys_now();
@@ -34,17 +35,24 @@ void delay_ms(uint32_t ms)
     }
 }
 
-/*============================================================================*
- * hgic_platform_raw_send: 厂商驱动回调, 发送 raw 数据
- *============================================================================*/
+/**
+ * @name    hgic_platform_raw_send
+ * @brief   Platform hook that pushes a raw frame onto the SDIO link.
+ * @param   data: pointer to the frame buffer.
+ * @param   len: frame length in bytes.
+ * @retval  Number of bytes written, or a negative value on error.
+ */
 int hgic_platform_raw_send(unsigned char *data, unsigned int len)
 {
     return hgic_sdspi_write(0, data, len);
 }
 
-/*============================================================================*
- * App_WaitFwInfo: 查询固件版本, 等待模块回复
- *============================================================================*/
+/**
+ * @name    App_WaitFwInfo
+ * @brief   Request the firmware version and poll the link until the module replies.
+ * @param   None
+ * @retval  None
+ */
 void App_WaitFwInfo(void)
 {
     log_info("[INIT] get fwinfo...\r\n");
@@ -57,10 +65,10 @@ void App_WaitFwInfo(void)
             GPIO_ReadInputDataBit(R900PNR_SPI_INT_PORT, R900PNR_SPI_INT_PIN) == 0)
         {
             g_r900pnr_spi_rx_flag = 0;
-            int read_len = hgic_sdspi_read(0, s_spi_rx_buf, sizeof(s_spi_rx_buf), 0);
+            int read_len = hgic_sdspi_read(0, Spi_Rx_Buf, sizeof(Spi_Rx_Buf), 0);
             if (read_len > 0)
             {
-                uint8_t *p_buf = s_spi_rx_buf;
+                uint8_t *p_buf = Spi_Rx_Buf;
                 uint32_t p_len = (uint32_t)read_len;
                 hgic_raw_rx(&p_buf, &p_len);
             }
@@ -68,15 +76,18 @@ void App_WaitFwInfo(void)
     }
 }
 
-/*============================================================================*
- * App_WiFiConfigure: 配置 WiFi 参数 (AP / STA)
- *============================================================================*/
+/**
+ * @name    App_WiFiConfigure
+ * @brief   Apply the SSID, key, band and channel settings for the compiled role.
+ * @param   None
+ * @retval  Result of the last configuration command (0 on success).
+ */
 int App_WiFiConfigure(void)
 {
     int ret = 0;
 
 #if (APP_WIFI_ROLE == APP_ROLE_AP)
-    /* AP 模式 */
+    /* AP mode */
     ret = hgic_raw_set_mode("ap");
     if (ret != 0)
     {
@@ -96,7 +107,7 @@ int App_WiFiConfigure(void)
     log_info("[CFG] set_wpa_psk = %d\r\n", ret);
 
 #elif (APP_WIFI_ROLE == APP_ROLE_STA)
-    /* STA 模式 */
+    /* STA mode */
     ret = hgic_raw_set_mode("sta");
     if (ret != 0)
     {
@@ -116,107 +127,122 @@ int App_WiFiConfigure(void)
     log_info("[CFG] set_wpa_psk = %d\r\n", ret);
 #endif
 
-    /* 频率范围: 908-924MHz, 带宽 8MHz */
+    /* Band: 908-924MHz, 8MHz bandwidth */
     uint16_t chan_list[] = APP_WIFI_CHAN_LIST;
     ret = hgic_raw_set_freq_range(chan_list[0], chan_list[2], APP_WIFI_BSS_BW);
     log_info("[CFG] set_freq_range = %d\r\n", ret);
 
-    /* 带宽 */
+    /* Bandwidth */
     ret = hgic_raw_set_bss_bw(APP_WIFI_BSS_BW);
     log_info("[CFG] set_bss_bw = %d\r\n", ret);
 
-    /* 信道列表 */
+    /* Channel list */
     ret = hgic_raw_set_chan_list(chan_list, 3);
     log_info("[CFG] set_chan_list = %d\r\n", ret);
 
-    /* 超功率模式 */
+    /* Super power mode */
     ret = hgic_raw_set_supper_pwr(1);
     log_info("[CFG] set_supper_pwr = %d\r\n", ret);
 
-    /* ACK 超时 (远距离用) */
+    /* ACK timeout, for long-distance links */
     ret = hgic_raw_set_acktmo(10);
     log_info("[CFG] set_acktmo = %d\r\n", ret);
 
-    /* 开启射频 */
+    /* Start the radio */
     ret = hgic_raw_open();
     log_info("[CFG] open = %d\r\n", ret);
 
-    /* 保存配置到 flash */
+    /* Persist the configuration to flash */
     ret = hgic_raw_save();
     log_info("[CFG] save = %d\r\n", ret);
 
 #if (APP_WIFI_ROLE == APP_ROLE_STA)
-    /* STA 发起关联 */
+    /* Kick off association */
     ret = hgic_raw_start_assoc();
     log_info("[CFG] start_assoc = %d\r\n", ret);
-    s_assoc_start_tick = sys_now();
+    Assoc_Start_Tick = sys_now();
 #endif
 
     return ret;
 }
 
-/*============================================================================*
- * App_RxDataHandler: 接收数据处理回调
- *============================================================================*/
+/**
+ * @name    App_RxDataHandler
+ * @brief   Accumulate received payload and log the throughput once per second.
+ * @param   data: pointer to the received payload.
+ * @param   len: payload length in bytes.
+ * @retval  None
+ */
 void App_RxDataHandler(uint8_t *data, uint32_t len)
 {
 #if (APP_WIFI_ROLE == APP_ROLE_AP)
-    s_rx_total_bytes += len;
-    s_rx_total_pkts++;
+    Rx_Total_Bytes += len;
+    Rx_Total_Pkts++;
 
-    if ((sys_now() - s_rx_last_print_tick) >= 1000u)
+    if ((sys_now() - Rx_Last_Print_Tick) >= 1000u)
     {
-        uint32_t rate = (s_rx_total_bytes * 8) / 1000;  /* Kbps */
+        uint32_t rate = (Rx_Total_Bytes * 8) / 1000;  /* Kbps */
         log_info("[RX STAT] pkts=%d payload_bytes=%d rate=%d Kbps\r\n",
-                 s_rx_total_pkts, s_rx_total_bytes, rate);
-        s_rx_total_bytes = 0;
-        s_rx_total_pkts  = 0;
-        s_rx_last_print_tick = sys_now();
+                 Rx_Total_Pkts, Rx_Total_Bytes, rate);
+        Rx_Total_Bytes = 0;
+        Rx_Total_Pkts  = 0;
+        Rx_Last_Print_Tick = sys_now();
     }
 #endif
 }
 
-/*============================================================================*
- * App_EventHandler: 事件回调
- *============================================================================*/
+/**
+ * @name    App_EventHandler
+ * @brief   Track the association state reported by the module.
+ * @param   event_id: event identifier from the raw layer.
+ * @param   value: event payload.
+ * @retval  None
+ */
 void App_EventHandler(uint8_t event_id, int16_t value)
 {
 #if (APP_WIFI_ROLE == APP_ROLE_STA)
     if (event_id == HGIC_EVENT_CONECTED)
     {
-        s_wifi_connected = 1;
+        Wifi_Connected = 1;
         log_info("[EVENT] WiFi connected!\r\n");
     }
     else if (event_id == HGIC_EVENT_DISCONECTED)
     {
-        s_wifi_connected = 0;
+        Wifi_Connected = 0;
         log_info("[EVENT] WiFi disconnected!\r\n");
     }
 #endif
 }
 
-/*============================================================================*
- * App_SendData: 发送数据
- *============================================================================*/
+/**
+ * @name    App_SendData
+ * @brief   Send one payload frame over the wireless link.
+ * @param   data: pointer to the payload buffer.
+ * @param   len: payload length in bytes.
+ * @retval  Number of bytes sent, or a negative value on error.
+ */
 int App_SendData(uint8_t *data, uint32_t len)
 {
     return hgic_raw_send_ether(data, len);
 }
 
-/*============================================================================*
- * App_DemoSendH265: 演示发送 H265 数据 (循环发送测试数据)
- *============================================================================*/
 #if (APP_WIFI_ROLE == APP_ROLE_STA)
+/**
+ * @name    App_DemoSendH265
+ * @brief   Stream a constant test payload and log the send rate once per second.
+ * @param   None
+ * @retval  None
+ */
 void App_DemoSendH265(void)
 {
     static uint8_t tx_buf[APP_TX_BUF_SIZE];
 
-    /* 检查关联超时 */
-    if (!s_tx_started && !s_wifi_connected)
+    /* Wait for association to complete */
+    if (!Tx_Started && !Wifi_Connected)
     {
-        if ((sys_now() - s_assoc_start_tick) >= APP_ASSOC_TIMEOUT_MS)
+        if ((sys_now() - Assoc_Start_Tick) >= APP_ASSOC_TIMEOUT_MS)
         {
-            s_tx_started = 1;
+            Tx_Started = 1;
             log_info("[TX] assoc timeout, start sending anyway\r\n");
         }
         else
@@ -225,55 +251,86 @@ void App_DemoSendH265(void)
         }
     }
 
-    if (!s_tx_started && s_wifi_connected)
+    if (!Tx_Started && Wifi_Connected)
     {
-        s_tx_started = 1;
+        Tx_Started = 1;
         log_info("[TX] WiFi connected, start sending\r\n");
     }
 
-    if (s_tx_started)
+    if (Tx_Started)
     {
-        /* 填充测试数据 */
+        /* Fill the payload */
         memset(tx_buf, 0xAA, APP_TX_PAYLOAD_LEN);
 
         int ret = hgic_raw_send_ether(tx_buf, APP_TX_PAYLOAD_LEN);
         if (ret > 0)
         {
-            s_tx_total_bytes += APP_TX_PAYLOAD_LEN;
-            s_tx_total_pkts++;
+            Tx_Total_Bytes += APP_TX_PAYLOAD_LEN;
+            Tx_Total_Pkts++;
         }
         else
         {
-            s_tx_fail_cnt++;
+            Tx_Fail_Cnt++;
         }
 
-        /* 每秒打印统计 */
-        if ((sys_now() - s_tx_last_print_tick) >= 1000u)
+        /* Log the rate once per second */
+        if ((sys_now() - Tx_Last_Print_Tick) >= 1000u)
         {
-            uint32_t rate = (s_tx_total_bytes * 8) / 1000;  /* Kbps */
+            uint32_t rate = (Tx_Total_Bytes * 8) / 1000;  /* Kbps */
             log_info("[TX STAT] pkts=%d bytes=%d rate=%d Kbps fail=%d\r\n",
-                     s_tx_total_pkts, s_tx_total_bytes, rate, s_tx_fail_cnt);
-            s_tx_total_bytes = 0;
-            s_tx_total_pkts  = 0;
-            s_tx_fail_cnt    = 0;
-            s_tx_last_print_tick = sys_now();
+                     Tx_Total_Pkts, Tx_Total_Bytes, rate, Tx_Fail_Cnt);
+            Tx_Total_Bytes = 0;
+            Tx_Total_Pkts  = 0;
+            Tx_Fail_Cnt    = 0;
+            Tx_Last_Print_Tick = sys_now();
         }
     }
 }
-#else
-
 #endif
+
+/**
+ * @name    App_R900PnrLinkCheck
+ * @brief   Probe the SDIO link periodically and re-initialize it if it went down.
+ * @param   None
+ * @retval  None
+ */
+void App_R900PnrLinkCheck(void)
+{
+    static uint32_t Link_Check_Tick = 0U;
+
+    if ((sys_now() - Link_Check_Tick) >= APP_ALIVE_PERIOD_MS)
+    {
+        Link_Check_Tick = sys_now();
+
+        /* Module falls back to SD mode on a comms fault */
+        if (hgic_sdspi_detect_alive(0) < 0)
+        {
+            log_error("[R900PNR] SDIO link lost, re-init\r\n");
+            hgic_sdspi_init(0);
+        }
+    }
+}
+
+/**
+ * @name    App_R900PnrPoll
+ * @brief   Service one radio frame per call; runs as the main-loop background task.
+ * @param   None
+ * @retval  None
+ */
 void App_R900PnrPoll(void)
 {
-    /* 1. SPI 接收处理 */
+    /* 1. Link health check */
+    App_R900PnrLinkCheck();
+
+    /* 2. Receive one frame when the module signals or INT is held low */
     if (g_r900pnr_spi_rx_flag ||
         GPIO_ReadInputDataBit(R900PNR_SPI_INT_PORT, R900PNR_SPI_INT_PIN) == 0)
     {
         g_r900pnr_spi_rx_flag = 0;
-        int read_len = hgic_sdspi_read(0, s_spi_rx_buf, sizeof(s_spi_rx_buf), 0);
+        int read_len = hgic_sdspi_read(0, Spi_Rx_Buf, sizeof(Spi_Rx_Buf), 0);
         if (read_len > 0)
         {
-            uint8_t *p_buf = s_spi_rx_buf;
+            uint8_t *p_buf = Spi_Rx_Buf;
             uint32_t p_len = (uint32_t)read_len;
             HGIC_RAW_RX_TYPE rx_type = hgic_raw_rx(&p_buf, &p_len);
 
@@ -283,7 +340,7 @@ void App_R900PnrPoll(void)
             }
             else if (rx_type == HGIC_RAW_RX_TYPE_EVENT)
             {
-                /* event 格式: event_id(1B) + value(2B) */
+                /* Event format: event_id(1B) + value(2B) */
                 if (p_len >= 1)
                 {
                     uint8_t event_id = p_buf[0];
@@ -293,38 +350,32 @@ void App_R900PnrPoll(void)
             }
         }
     }
-    /* 2. 数据发送 (仅 STA) */
+
+    /* 3. Send path, STA only */
 #if (APP_WIFI_ROLE == APP_ROLE_STA)
     App_DemoSendH265();
 #endif
 }
 
-
-
 /**
- * @brief 初始化 R900PNR Wi-Fi 模块硬件接口
- *
- * 该函数执行以下步骤：
- * 1. 初始化 SPI 接口（失败则返回错误码）。
- * 2. 初始化 SDIO 接口，若模块未就绪则按配置的重试次数和间隔进行重试。
- * 3. 等待 SDIO 总线稳定。
- * 4. 输出配置 Wi-Fi 的日志。
- *
- * @return 0 表示初始化成功；负值表示失败，具体错误码见 @ref r900pnr_error_t。
+ * @name    r900pnr_wifi_module_init
+ * @brief   Initialize the SPI interface and the SDIO link to the R900PNR module.
+ * @param   None
+ * @retval  R900PNR_OK on success, or a negative r900pnr_error_t value on failure.
  */
 int r900pnr_wifi_module_init(void)
 {
     int ret = 0;
 
-    /* 1. 初始化 SPI 接口 */
-    if (R900PNR_SPI_Init() != 0) 
+    /* 1. SPI interface */
+    if (R900PNR_SPI_Init() != 0)
 		{
         log_error("[R900PNR] SPI init failed");
         return R900PNR_ERR_SPI_INIT;
     }
     log_info("[R900PNR] SPI init success");
 
-    /* 2. 初始化 SDIO 接口，带重试机制 */
+    /* 2. SDIO interface, up to SDIO_INIT_MAX_RETRY_COUNT attempts */
     ret = hgic_sdspi_init(0);
     for (int attempt = 1; (ret != 0) && (attempt < SDIO_INIT_MAX_RETRY_COUNT); attempt++)
 		{
@@ -334,18 +385,17 @@ int r900pnr_wifi_module_init(void)
 			ret = hgic_sdspi_init(0);
     }
 
-    if (ret != 0) 
+    if (ret != 0)
 		{
 			log_info("[R900PNR] SDIO init failed after %d attempts", SDIO_INIT_MAX_RETRY_COUNT);
 			return R900PNR_ERR_SDIO_INIT;
     }
     log_info("[R900PNR] SDIO init success");
 
-    /* 3. 等待 SDIO 总线稳定 */
+    /* 3. Wait for the bus to settle */
     delay_ms(SDIO_STABLE_DELAY_MS);
     log_info("[R900PNR] SDIO bus stable after %d ms", SDIO_STABLE_DELAY_MS);
 
-    /* 4. 输出配置 Wi-Fi 的日志 */
     log_info("[R900PNR] Configure Wi-Fi...");
 
     return R900PNR_OK;

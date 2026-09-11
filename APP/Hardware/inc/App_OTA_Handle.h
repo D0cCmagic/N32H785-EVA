@@ -2,8 +2,9 @@
 #define __APP_OTA_HANDLE_H__
 #include "stdint.h"
 
-/* APP 触发 OTA 升级：串口命令 "UPDATE"（须与 Bootloader 侧 IAP.c 保持一致） */
-#define OTA_FLAG_ADDR    (0x2401FF00u)   /* AXI SRAM 尾部约定地址（scatter 已预留） */
+/* App side requests an OTA upgrade via the serial command "UPDATE".
+ * Must stay in sync with the Bootloader side in IAP.c. */
+#define OTA_FLAG_ADDR    (0x2401FF00u)   /* Agreed address at the end of AXI SRAM, reserved in scatter */
 #define OTA_FLAG_MAGIC   (0x4F544100u)   /* "OTA\0" */
 #define OTA_CMD_STRING   "UPDATE"
 

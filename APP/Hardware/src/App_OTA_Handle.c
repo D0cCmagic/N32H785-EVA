@@ -4,6 +4,12 @@
 #include "misc.h"
 volatile uint8_t ota_request_flag = 0;
 
+/**
+ * @name    ota_cmd_feed
+ * @brief   Feed one received character to the "UPDATE" command matcher.
+ * @param   ch: the character received on the console UART.
+ * @retval  1 when the full command followed by CR or LF has been matched, else 0.
+ */
 uint8_t ota_cmd_feed(uint8_t ch)
 {
     static const char cmd[] = OTA_CMD_STRING;
@@ -31,6 +37,12 @@ uint8_t ota_cmd_feed(uint8_t ch)
     return 0;
 }
 
+/**
+ * @name    ota_request_reset
+ * @brief   Publish the OTA flag to the agreed SRAM address and reboot.
+ * @param   None
+ * @retval  None, does not return.
+ */
 void ota_request_reset(void)
 {
     printf("\r\n OTA update request received, reboot to bootloader...\r\n");
@@ -41,6 +53,12 @@ void ota_request_reset(void)
 }
 
 
+/**
+ * @name    OTA_UpdateCheck_Handle
+ * @brief   Reboot into the bootloader when an OTA request is pending.
+ * @param   None
+ * @retval  None
+ */
 void OTA_UpdateCheck_Handle(void)
 {
 	if (ota_request_flag) { ota_request_reset(); }

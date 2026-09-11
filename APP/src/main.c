@@ -8,8 +8,8 @@
 
 /**
 *\*\file main.c
-*\*\brief  N32H785 + ETH + R900PNR (TXW8301 FMAC) 融合示例w
-*\*\       同时加入 R900PNR SPI raw data 通信功能
+*\*\brief  N32H785 + ETH + R900PNR (TXW8301 FMAC) combined example
+*\*\        also adds R900PNR SPI raw data communication
 */
 
 #include "main.h"
@@ -23,14 +23,27 @@
 #include "delay.h"
 #include "App_OTA_Handle.h"    
 #include "App_VectorTable.h"
-
+#include "Mcal_InitSum.h"
 
 __IO int ReceiveDataFlag = 0;
 __IO uint32_t TimeBase = 0;
+/**
+ * @name    sys_now
+ * @brief   Return the 1ms system timebase.
+ * @param   None
+ * @retval  Milliseconds elapsed since TimeBase was reset.
+ */
 uint32_t sys_now(void)
 {
     return TimeBase;
 }
+
+/**
+ * @name    MPU_Config
+ * @brief   Configure the MPU with the privileged default memory map.
+ * @param   None
+ * @retval  None
+ */
 static void MPU_Config(void)
 {
     MPU_Region_InitType MPU_InitStruct;
@@ -40,15 +53,23 @@ static void MPU_Config(void)
     MPU_Enable(MPU_PRIVILEGED_DEFAULT);
 }
 
+
+
+
+/**
+ * @name    main
+ * @brief   Bring up clocks, caches and peripherals, then run the main loop.
+ * @param   None
+ * @retval  Never returns.
+ */
 int main(void)
 {
 	
-    App_VectorTableInit();   /* VTOR 指向 ITCM 镜像 + SysTick 槽位重定向（替代原裸 VTOR 赋值） */
+    App_VectorTableInit();   /* Point VTOR at the ITCM image and remap the SysTick slot */
     RCC_ClocksTypeDef clk;
     SCB_InvalidateDCache();
     SCB_InvalidateICache();
     RCC_SetSysClkToMode0();
-    log_init();
     MPU_Config();
     SCB_EnableICache();
     SCB_EnableDCache();
@@ -56,7 +77,11 @@ int main(void)
     SysTick_CLKSourceConfig(SysTick_CLKSource_CORECLK);
     SysTick_Config(clk.M7ClkFreq / 1000);
     NVIC_SetPriority(SysTick_IRQn, 1);
-
+		
+	
+		Mcal_InitSum();
+	
+	
 #if (APP_WIFI_ROLE == APP_ROLE_AP)
     log_info("[ROLE] AP receiver (R900PNR rate test)\r\n");
 #else
@@ -64,12 +89,11 @@ int main(void)
 #endif
 		if(0 != r900pnr_wifi_module_init())
 		log_error("Wi-Fi module init failed");
-     App_WiFiConfigure();
+    App_WiFiConfigure();
 
     while (1)
     {
-			/* R900PNR 处理 */
-			App_R900PnrPoll();
-			OTA_UpdateCheck_Handle();
+			App_R900PnrPoll();     
+			Task_Handle_Cycle();   
     }
 }

@@ -1,11 +1,11 @@
-/******************************************************************************
+/**
  * @file    r900pnr_spi_init.c
- * @brief   R900PNR SPI 接口初始化: GPIO / SPI / EXTI / NVIC
- * @note    适配 N32H785 开发板, M7 内核, 标准外设库
- *          调试串口 printf 由 LWIP 例程的 log.c 提供, 本文件不再初始化 USART
- *          不使用 DMA: hgic_sdspi_v2.c 内部用同一 buffer 做 TX+RX,
- *          DMA + D-Cache 会导致栈变量损坏, 改用 CPU 批量轮询
- ******************************************************************************/
+ * @brief   R900PNR SPI interface setup: GPIO / SPI / EXTI / NVIC.
+ * @note    Targets the N32H785 dev board, M7 core, standard peripheral library.
+ *          Logging comes from the LWIP log.c, so this file does not bring up a UART.
+ *          DMA is not used: hgic_sdspi_v2.c shares one buffer between TX and RX,
+ *          so DMA with the D-Cache corrupts stack variables. CPU polling is used instead.
+ */
 #include "n32h7xx.h"
 #include "n32h7xx_gpio.h"
 #include "n32h7xx_spi.h"
@@ -15,16 +15,17 @@
 #include "r900pnr_spi_api.h"
 
 /**
- * @brief  配置 SPI1 相关 GPIO
- *         SCK/PA5, MISO/PA6, MOSI/PA7 配置为复用推挽
- *         CS/PA4    配置为 GPIO 推挽输出, 默认高电平
- *         INT/PA8   配置为浮空输入, 外部中断下降沿
+ * @name    R900PNR_SPI_GPIO_Init
+ * @brief   Configure the SPI1 pins: SCK/MISO/MOSI as alternate function,
+ *          CS as a GPIO output held high, INT as a floating input.
+ * @param   None
+ * @retval  None
  */
 static void R900PNR_SPI_GPIO_Init(void)
 {
     GPIO_InitType GPIO_InitStructure;
 
-    /* 使能 GPIOA 时钟 (SPI1 和 INT 都在 GPIOA) */
+    /* GPIOA clock covers SPI1 and the interrupt pin alike */
     RCC_EnableAHB5PeriphClk1(R900PNR_SPI_SCK_CLK | R900PNR_SPI_MISO_CLK |
                             R900PNR_SPI_MOSI_CLK | R900PNR_SPI_CS_CLK |
                             R900PNR_SPI_INT_CLK, ENABLE);
@@ -52,7 +53,7 @@ static void R900PNR_SPI_GPIO_Init(void)
     GPIO_InitStructure.GPIO_Alternate = R900PNR_SPI_MOSI_AF;
     GPIO_InitPeripheral(R900PNR_SPI_MOSI_PORT, &GPIO_InitStructure);
 
-    /* 软件片选 CS, 默认拉高 */
+    /* Software chip select, idle high */
     GPIO_InitStructure.Pin          = R900PNR_SPI_CS_PIN;
     GPIO_InitStructure.GPIO_Mode    = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStructure.GPIO_Pull    = GPIO_NO_PULL;
@@ -60,7 +61,7 @@ static void R900PNR_SPI_GPIO_Init(void)
     GPIO_InitPeripheral(R900PNR_SPI_CS_PORT, &GPIO_InitStructure);
     GPIO_SetBits(R900PNR_SPI_CS_PORT, R900PNR_SPI_CS_PIN);
 
-    /* R900PNR 中断引脚, 下降沿触发 */
+    /* R900PNR interrupt pin, driven low when data is available */
     GPIO_InitStructure.Pin          = R900PNR_SPI_INT_PIN;
     GPIO_InitStructure.GPIO_Mode    = GPIO_MODE_INPUT;
     GPIO_InitStructure.GPIO_Pull    = GPIO_NO_PULL;
@@ -69,45 +70,47 @@ static void R900PNR_SPI_GPIO_Init(void)
 }
 
 /**
- * @brief  配置 EXTI: PA8 -> EXTI_LINE8, 下降沿中断
+ * @name    R900PNR_SPI_EXTI_Init
+ * @brief   Route PA8 to EXTI line 8 and enable the falling-edge interrupt.
+ * @param   None
+ * @retval  None
  */
 static void R900PNR_SPI_EXTI_Init(void)
 {
     EXTI_InitType EXTI_InitStructure;
 
-    /* 将 EXTI_LINE8 映射到 GPIOA_Pin_8 */
+    /* Map EXTI_LINE8 onto PA8 */
     GPIO_ConfigEXTILine(R900PNR_SPI_INT_EXTI_LINE, R900PNR_SPI_INT_EXTI_GPIO);
 
-    /* 配置 EXTI_LINE8: 中断模式, 下降沿触发 */
+    /* Interrupt mode, falling edge */
     EXTI_InitStruct(&EXTI_InitStructure);
     EXTI_InitStructure.EXTI_Line    = R900PNR_SPI_INT_EXTI_LINE;
     EXTI_InitStructure.EXTI_Mode    = EXTI_Mode_Interrupt;
     EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Falling;
     EXTI_InitPeripheral(&EXTI_InitStructure);
 
-    /* 清除挂起位, 使能 NVIC */
+    /* Clear any stale pending bit, then enable the NVIC line */
     EXTI_ClrITPendBit(R900PNR_SPI_INT_EXTI_LINE);
     NVIC_SetPriority(R900PNR_SPI_INT_IRQn, 5);
     NVIC_EnableIRQ(R900PNR_SPI_INT_IRQn);
 }
 
 /**
- * @brief  配置 SPI1 主模式, 全双工, Mode 0
+ * @name    R900PNR_SPI_Periph_Init
+ * @brief   Bring up SPI1 in master, full-duplex, Mode 0.
+ * @param   None
+ * @retval  None
  */
 static void R900PNR_SPI_Periph_Init(void)
 {
     SPI_InitType SPI_InitStructure;
 
-    /* 使能 SPI1 时钟 */
     R900PNR_SPIx_APBx_CLK_CMD(R900PNR_SPIx_CLK, ENABLE);
 
-    /* SPI 去初始化 */
     SPI_I2S_DeInit(R900PNR_SPIx);
 
-    /* 填充默认参数 */
     SPI_InitStruct(&SPI_InitStructure);
 
-    /* 配置 SPI1 参数 */
     SPI_InitStructure.SpiMode       = R900PNR_SPI_MODE;
     SPI_InitStructure.DataDirection = R900PNR_SPI_DIR;
     SPI_InitStructure.DataLen       = R900PNR_SPI_DATA_SIZE;
@@ -120,13 +123,14 @@ static void R900PNR_SPI_Periph_Init(void)
 
     SPI_Init(R900PNR_SPIx, &SPI_InitStructure);
 
-    /* 使能 SPI1 */
     SPI_Enable(R900PNR_SPIx, ENABLE);
 }
 
 /**
- * @brief  R900PNR SPI 接口统一初始化入口
- * @retval 0 成功, 其他失败
+ * @name    R900PNR_SPI_Init
+ * @brief   Single entry point that brings up GPIO, EXTI and the SPI1 peripheral.
+ * @param   None
+ * @retval  0 on success.
  */
 int R900PNR_SPI_Init(void)
 {

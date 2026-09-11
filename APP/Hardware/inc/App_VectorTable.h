@@ -1,13 +1,11 @@
 /**
- *******************************************************************************
  * @file    App_VectorTable.h
- * @brief   ITCM vector table runtime management module
+ * @brief   ITCM vector table runtime management module.
  *
  * @note    SDK startup file slot convention: slot 15 (SysTick) points to an
  *          empty N32SysTick_Handler, while the real user handler is linked at
  *          slot 250 (normally remapped by CopyVectTable, which this ITCM
  *          APP does not use). ITCM is RAM, so the table is writable.
- *******************************************************************************
  */
 
 #ifndef __APP_VECTORTABLE_H__

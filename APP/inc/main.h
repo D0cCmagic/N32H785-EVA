@@ -112,6 +112,9 @@ extern "C" {
 }
 #endif
 
+
+/* 1ms SysTick timebase, incremented by SysTick_Handler; ISR-shared, must be volatile */
+extern volatile uint32_t TimeBase;
 #endif /* __MAIN_H__ */
 
 
